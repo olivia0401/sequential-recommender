@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+data/*
+!data/README.md
+*.pt
+*.joblib
+logs_*.txt
+.DS_Store
