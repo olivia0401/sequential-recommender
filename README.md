@@ -69,25 +69,91 @@ strong baseline: on MovieLens the previous item already predicts the next one we
 | Popularity | 0.342 | 0.186 | 0.163 |
 | Markov (first-order) | 0.997 | 0.958 | 0.944 |
 | GRU4Rec | 0.810 | 0.704 | 0.677 |
-| SASRec | 0.994 | 0.992 | 0.992 |
+| SASRec | 0.804 | 0.693 | 0.665 |
 
-The e-commerce numbers are much higher across the board. Browsing sessions are short
-and repetitive (visitors move between a handful of items), so next-item prediction
-against sampled negatives is far easier than on MovieLens: both the Markov baseline
-and SASRec sit near the ceiling. The interesting gap here is GRU4Rec vs SASRec:
-self-attention captures the session structure that the GRU misses.
+The e-commerce numbers are higher than MovieLens across the board. Browsing sessions
+are short and repetitive (visitors move between a handful of items), so next-item
+prediction against sampled negatives is easier: the first-order Markov baseline sits
+near the ceiling because the previous item usually predicts the next one outright.
+GRU4Rec and SASRec land close together (~0.80 Recall@10); neither sequence model beats
+the Markov baseline on this dataset, which is the honest result for such short sessions.
+
+> **Correction.** An earlier version of this table reported SASRec at Recall@10 0.994.
+> That was a masking bug: for any left-padded history (almost every user) the
+> self-attention produced `nan` at the final position, and `nan` compares false against
+> every negative, so the ranker scored those users as a perfect rank 1. Fixing the mask
+> (see `SASRec.forward` in `src/models.py`) removes the inflation and brings SASRec back
+> in line with GRU4Rec. The same bug also silently broke the off-policy evaluation below
+> until it was fixed.
+
+## Off-policy / uplift evaluation (causal)
+
+Ranking metrics answer "is the model good at guessing the next item?". A business
+has a different question: *if we had shown this recommender's picks, would people
+have converted more?* You can't read that off the logs directly — the logs only
+record what happened under the system that was already running. It's a causal,
+counterfactual question, and `src/offpolicy.py` estimates it **off-policy**: from
+the logged data alone, without deploying anything.
+
+I frame the RetailRocket logs as a contextual bandit:
+
+- **context** = the visitor's history so far
+- **action** = the item they interacted with next (the test target)
+- **reward** = 1 if that interaction was an `addtocart` / `transaction`, else 0
+  (did it *convert*, not just get viewed — this is the stronger signal the ranking
+  metrics ignore)
+
+The estimator is self-normalised inverse propensity scoring (SNIPS):
+`V(π) = Σ wᵢ rᵢ / Σ wᵢ`, with importance weights `wᵢ = π(aᵢ|xᵢ) / π₀(aᵢ)`. The
+logging policy `π₀` is modelled as item popularity (add-one smoothed for full
+support, which IPS needs); each recommender becomes a distribution `π` via a
+softmax over its scores. Weights are clipped and I report effective sample size
+(ESS) and clipped-fraction so the variance is visible, not hidden.
+
+The estimator is unit-tested and cross-checked against [Open Bandit Pipeline
+(OBP)](https://github.com/st-tech/zr-obp), the reference off-policy-evaluation
+library: on synthetic bandit feedback our `snips` reproduces OBP's
+`InverseProbabilityWeighting` and `SelfNormalizedInverseProbabilityWeighting`
+exactly (`tests/test_obp_agreement.py`; `pip install obp` to run it, otherwise it
+skips). We keep our own implementation because OBP materialises a dense
+`(rounds × actions)` distribution, which is wasteful over an 11k-item catalogue.
+
+```
+python -m src.offpolicy --data data/events.csv --sasrec model_retailrocket.pt
+```
+
+Logging (popularity) conversion rate **V(π₀) = 0.0562**:
+
+| Policy | V(π) est. conversion | Uplift vs logging | ESS | Clipped |
+|--------|----------------------|-------------------|-----|---------|
+| Popularity *(sanity: = π₀)* | 0.0562 | +0.0000 | 100% | 0% |
+| Markov (first-order) | 0.0672 | +0.0110 | 45% | 44% |
+| SASRec | 0.0599 | +0.0037 | 67% | 54% |
+
+Reading it honestly: Markov shows the larger raw uplift but with a much lower ESS
+and heavy clipping, so that estimate is the noisier one — exactly the variance
+problem SNIPS is meant to expose. The popularity row is the built-in self-check:
+it *is* the logging policy, so its uplift must come out at 0, and it does.
+
+**Caveats (the numbers are only as good as these).** `π₀` is estimated, not logged
+— real off-policy evaluation uses the deployed system's true propensities, so treat
+the popularity model as a proxy. IPS is unbiased only under full support and a
+roughly-correct `π₀`, and its variance grows when `π` and `π₀` disagree; the ESS
+and clip columns are there to keep that trade-off in view.
 
 ## Layout
 
 ```
 data/    datasets, not committed
-src/     data.py, metrics.py, baselines.py, models.py, train.py
+src/     data.py, metrics.py, baselines.py, models.py, train.py, offpolicy.py
 api/     FastAPI service
+tests/   estimator + policy unit tests, incl. an OBP cross-check
 ```
 
 ## Next steps
 
-- Use addtocart / transaction events as a stronger signal than views.
-- Add an off-policy / uplift evaluation to ask which recommendation actually
-  changes behaviour, not just which item is likely next.
+- Off-policy estimation from *logged propensities* rather than a popularity proxy,
+  and a doubly-robust estimator to cut the IPS variance seen above.
+- Use addtocart / transaction events as a training signal too, not just as the
+  evaluation reward.
 - Expose latency and request metrics on the API.

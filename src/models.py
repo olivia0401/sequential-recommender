@@ -53,15 +53,27 @@ class SASRec(nn.Module):
         self.encoder = nn.TransformerEncoder(layer, num_layers=blocks)
         self.out = nn.Linear(emb_dim, n_items)
         self.max_len = max_len
+        self.heads = heads
 
     def forward(self, x):
         b, L = x.shape
         pos = torch.arange(L, device=x.device).unsqueeze(0).expand(b, L)
         h = self.drop(self.item_emb(x) + self.pos_emb(pos))
-        # causal mask so position t only attends to <= t
+        # Block a query position from attending to (a) anything after it (causal)
+        # and (b) any PAD key. Folding both into one per-sample mask instead of a
+        # separate src_key_padding_mask lets us keep the diagonal open: a fully
+        # left-padded query row would otherwise be entirely masked, its softmax
+        # would be nan, and 0 * nan then poisons the real positions that mask it
+        # out as a key. Left the diagonal open, padded rows stay finite and,
+        # being masked as keys everywhere else, never leak into real outputs.
         causal = torch.triu(torch.ones(L, L, device=x.device, dtype=torch.bool), 1)
-        pad_mask = x == PAD
-        h = self.encoder(h, mask=causal, src_key_padding_mask=pad_mask)
+        blocked = causal[None] | (x == PAD)[:, None, :]      # (b, L, L)
+        eye = torch.eye(L, device=x.device, dtype=torch.bool)
+        blocked = blocked & ~eye[None]                        # keep self-attention
+        mask = torch.zeros(b, L, L, dtype=h.dtype, device=x.device)
+        mask = mask.masked_fill(blocked, float("-inf"))
+        mask = mask[:, None].expand(b, self.heads, L, L).reshape(b * self.heads, L, L)
+        h = self.encoder(h, mask=mask)
         return self.out(h)
 
 
