@@ -240,12 +240,13 @@ def main():
             ckpt = torch.load(args.gru4rec, map_location="cpu")
             m = GRU4Rec(ckpt["n_items"])
             m.load_state_dict(ckpt["state_dict"])
-            policies["gru4rec"] = NeuralPolicy(m, args.max_len, args.temp)
+            policies["gru4rec"] = NeuralPolicy(m, ckpt.get("max_len", args.max_len), args.temp)
         if args.sasrec:
             ckpt = torch.load(args.sasrec, map_location="cpu")
-            m = SASRec(ckpt["n_items"], max_len=args.max_len)
+            max_len = ckpt.get("max_len", args.max_len)
+            m = SASRec(ckpt["n_items"], max_len=max_len)
             m.load_state_dict(ckpt["state_dict"])
-            policies["sasrec"] = NeuralPolicy(m, args.max_len, args.temp)
+            policies["sasrec"] = NeuralPolicy(m, max_len, args.temp)
 
     results = evaluate_policies(data, policies, clip=args.clip)
     _print_table(results)

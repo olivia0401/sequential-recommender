@@ -17,6 +17,9 @@ class Dataset:
     test_reward: dict = None  # user -> 1 if the test interaction converted
                               # (addtocart / transaction), else 0. RetailRocket
                               # only; None for MovieLens (no event types).
+    item_ids: list = None     # item_ids[i - 1] is the raw dataset id of internal
+                              # index i (index 0 is PAD). Saved in checkpoints so
+                              # the API can accept and return raw ids.
 
 
 def load_movielens_1m(path="data/ml-1m/ratings.dat", min_len=5):
@@ -52,7 +55,8 @@ def load_movielens_1m(path="data/ml-1m/ratings.dat", min_len=5):
         for it in seq[:-2]:
             item_pop[it] += 1
 
-    return Dataset(train=train, val=val, test=test, n_items=n_items, item_pop=item_pop)
+    return Dataset(train=train, val=val, test=test, n_items=n_items, item_pop=item_pop,
+                   item_ids=[int(i) for i in unique_items])
 
 
 def load_retailrocket(path="data/events.csv", min_len=5, min_item_count=50):
@@ -108,7 +112,8 @@ def load_retailrocket(path="data/events.csv", min_len=5, min_item_count=50):
             item_pop[it] += 1
 
     return Dataset(train=train, val=val, test=test, n_items=n_items,
-                   item_pop=item_pop, test_reward=test_reward)
+                   item_pop=item_pop, test_reward=test_reward,
+                   item_ids=[int(i) for i in unique_items])
 
 
 def sample_negatives(true_item, n_items, seen, rng, k=100):

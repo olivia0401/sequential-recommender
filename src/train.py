@@ -1,5 +1,6 @@
 import argparse
 import json
+import random
 
 import numpy as np
 
@@ -23,6 +24,19 @@ def eval_baseline(model, data, split="test", n_neg=100, seed=42):
     return aggregate(ranks)
 
 
+def set_seed(seed):
+    """Seed Python, NumPy and (if installed) torch so runs are repeatable."""
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+    except ImportError:
+        return
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True,
@@ -33,7 +47,9 @@ def main():
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--max-len", type=int, default=50)
     ap.add_argument("--save", default=None)
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+    set_seed(args.seed)
 
     print(f"loading {args.dataset} ...")
     if args.dataset == "movielens":
@@ -58,7 +74,11 @@ def main():
         metrics = evaluate(model, data, split="test", max_len=args.max_len)
         if args.save:
             torch.save({"state_dict": model.state_dict(),
-                        "n_items": data.n_items}, args.save)
+                        "n_items": data.n_items,
+                        "model": args.model,
+                        "max_len": args.max_len,
+                        "dataset": args.dataset,
+                        "item_ids": data.item_ids}, args.save)
             print(f"saved -> {args.save}")
 
     print(f"\n=== {args.model} (test) ===")

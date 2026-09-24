@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset as TorchDataset
 
-from .data import PAD, Dataset
+from .data import PAD
 
 
 class SequenceDataset(TorchDataset):
