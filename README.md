@@ -45,12 +45,39 @@ python -m src.train --model gru4rec --dataset retailrocket --epochs 15
 python -m src.train --model sasrec --dataset retailrocket --epochs 15 --save model_retailrocket.pt
 ```
 
-Serve top-N from a saved SASRec model (on Windows call uvicorn through `python -m`):
+Training is seeded (`--seed`, default 42). Checkpoints store the model weights,
+`max_len` and the raw-id mapping.
+
+Serve top-N from a saved SASRec model:
 
 ```
-set MODEL_PATH=model_retailrocket.pt
-python -m uvicorn api.app:app --reload
-curl -X POST localhost:8000/recommend -H "content-type: application/json" -d "{\"history\": [12, 45, 7], \"k\": 10}"
+# macOS / Linux
+MODEL_PATH=model_retailrocket.pt python -m uvicorn api.app:app
+# Windows (cmd):  set MODEL_PATH=model_retailrocket.pt  then  python -m uvicorn api.app:app
+
+curl -X POST localhost:8000/recommend -H "content-type: application/json"      -d '{"history": [ID1, ID2, ID3], "k": 10}'   # replace with real item ids
+```
+
+`history` holds raw dataset item ids, oldest first (MovieLens `movieId` or
+RetailRocket `itemid`), and the response returns raw ids too. Unknown ids,
+and `k` outside 1..100, get a 422. Checkpoints saved before the id mapping was
+added still load; for those, `history` uses internal indices. By default,
+items already in the history are left out of the results
+(`"exclude_seen": false` turns this off). The offline evaluation is different:
+there the target can be an item the user already saw.
+
+With Docker (the checkpoint is mounted, not baked into the image):
+
+```
+docker build -t seqrec .
+docker run -p 8000:8000 -v "$PWD/model_retailrocket.pt:/models/model.pt:ro" seqrec
+```
+
+Tests (no dataset or GPU needed):
+
+```
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 ## Evaluation
@@ -82,6 +109,12 @@ not logged* — the popularity model is a proxy, and the numbers are only as goo
 as that assumption.
 
 ## Results
+
+> **Provenance.** The numbers below come from local runs of the commands above.
+> The run logs and metric files were not committed, so nothing in this repo
+> backs them yet. Training was not seeded when they were produced, so a re-run
+> will differ slightly. Re-running `python -m src.train ...` and
+> `python -m src.offpolicy ... --json results.json` regenerates them.
 
 ### MovieLens-1M (6040 users, 3706 items)
 
@@ -180,7 +213,8 @@ and clip columns are there to keep that trade-off in view.
 data/    datasets, not committed
 src/     data.py, metrics.py, baselines.py, models.py, train.py, offpolicy.py
 api/     FastAPI service
-tests/   estimator + policy unit tests, incl. an OBP cross-check
+tests/   estimator, policy, SASRec masking and API tests, incl. an OBP cross-check
+Dockerfile, .github/workflows/ci.yml
 ```
 
 ## Next steps
