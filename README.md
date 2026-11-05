@@ -110,6 +110,11 @@ as that assumption.
 
 ## Results
 
+> **2026-11-05 evaluation correction:** sampled negatives are now unique, and
+> equal scores place the target last, as the ranker's documented policy requires.
+> Non-finite scores fail evaluation. The historical tables below predate these
+> fixes and have not been re-measured; do not treat them as current benchmark results.
+
 > **Provenance.** The numbers below come from local runs of the commands above.
 > The run logs and metric files were not committed, so nothing in this repo
 > backs them yet. Training was not seeded when they were produced, so a re-run

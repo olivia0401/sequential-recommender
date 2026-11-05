@@ -4,8 +4,11 @@ import numpy as np
 def rank_of_true(scores, true_index):
     # 1-based position of the true item once candidates are sorted by score.
     # ties break against us (true item goes after equal-scoring ones).
+    scores = np.asarray(scores)
+    if scores.ndim != 1 or not np.isfinite(scores).all():
+        raise ValueError("ranking scores must be a finite one-dimensional array")
     true_score = scores[true_index]
-    return int((scores > true_score).sum()) + 1
+    return int((scores >= true_score).sum())
 
 
 def recall_at_k(rank, k):

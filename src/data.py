@@ -118,9 +118,28 @@ def load_retailrocket(path="data/events.csv", min_len=5, min_item_count=50):
 
 def sample_negatives(true_item, n_items, seen, rng, k=100):
     """k random item ids that aren't the true item and weren't seen by the user."""
-    negs = []
-    while len(negs) < k:
-        cand = int(rng.integers(1, n_items))  # 1.. because 0 is PAD
-        if cand != true_item and cand not in seen:
-            negs.append(cand)
-    return negs
+    if k < 0:
+        raise ValueError("k must be non-negative")
+    excluded = {item for item in (*seen, true_item) if 1 <= item < n_items}
+    available_count = max(0, n_items - 1 - len(excluded))
+    count = min(k, available_count)
+    # Small catalogues may have fewer than k eligible items. Never duplicate
+    # candidates or spin forever when a user has seen the whole catalogue.
+    if not count:
+        return []
+    if count * 2 >= available_count:
+        available = np.array([item for item in range(1, n_items) if item not in excluded])
+        return rng.choice(available, size=count, replace=False).tolist()
+    # Avoid scanning a large catalogue once per user when only a few negatives
+    # are needed. Keep the draws bounded, with a finite fallback for dense users.
+    negatives = set()
+    for _ in range(count * 20):
+        candidate = int(rng.integers(1, n_items))
+        if candidate not in excluded:
+            negatives.add(candidate)
+        if len(negatives) == count:
+            return list(negatives)
+    remaining = [item for item in range(1, n_items)
+                 if item not in excluded and item not in negatives]
+    return list(negatives) + rng.choice(
+        remaining, size=count - len(negatives), replace=False).tolist()
